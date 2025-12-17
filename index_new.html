@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FullDiT2: Efficient In-Context Conditioning</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <!-- LongCat Theme Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&family=Raleway:wght@600&family=Courier+New&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    
+    <!-- MathJax -->
+    <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+      svg: { fontCache: 'global' }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        /* ================= GLOBAL STYLES (LongCat Theme) ================= */
+        * { box-sizing: border-box; }
+        :root { --theme-accent: #6ab095; --bg-dark: #28282d; --card-bg: #222; }
+        
+        body {
+            margin: 0;
+            font-family: "Outfit", sans-serif;
+            background: var(--bg-dark);
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4, h5 { font-family: "Raleway", sans-serif; font-weight: 600; margin-top: 0; }
+        h1 { font-size: 3.5rem; }
+        h2 { font-size: 2.2rem; margin-bottom: 30px; text-align: center; color: #fff; }
+        h3 { font-size: 1.5rem; color: var(--theme-accent); margin-bottom: 20px; }
+        
+        p { font-size: 16px; color: #b9bbc6; line-height: 1.7; font-weight: 300; }
+        a { color: var(--theme-accent); text-decoration: none; transition: 0.3s; }
+        a:hover { color: #fff; text-shadow: 0 0 10px rgba(106, 176, 149, 0.5); }
+
+        section {
+            border-top: 1px solid #333;
+            padding: 80px 5%;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+        .text-center { text-align: center; }
+
+        /* ================= HERO SECTION ================= */
+        #intro {
+            height: 100vh;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+            border: none;
+        }
+        #intro .background-video {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0;
+        }
+        #intro .background-video video {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            filter: brightness(40%) blur(5px);
+            transform: scale(1.05);
+        }
+        #intro .content {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            padding: 20px;
+            max-width: 1000px;
+        }
+        #intro h1 { text-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 10px; }
+        .authors-list { font-size: 1.1rem; line-height: 1.8; color: #ddd; margin-bottom: 10px; }
+        .affiliation { font-size: 0.95rem; color: #aaa; }
+        
+        .hero-btn {
+            display: inline-flex; align-items: center; gap: 10px;
+            padding: 12px 28px; margin: 15px 10px;
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 50px; color: #fff; backdrop-filter: blur(10px);
+            font-weight: 600; transition: all 0.3s ease;
+        }
+        .hero-btn:hover { background: #fff; color: #000; transform: translateY(-2px); }
+
+        /* ================= MEDIA CARDS (LongCat Style) ================= */
+        .media-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #333;
+            transition: transform 0.3s;
+            height: 100%;
+        }
+        .media-card:hover { transform: translateY(-5px); box-shadow: 0 15px 40px rgba(0,0,0,0.3); }
+
+        .media-content {
+            flex: 1;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            min-height: 180px; 
+        }
+        .media-content video, .media-content img {
+            width: 100%; height: 100%;
+            object-fit: contain; /* Full content visible */
+            display: block;
+        }
+        /* Text Prompt Box Style */
+        .text-prompt-box {
+            width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+            background: #1a1a1d;
+            color: #e0e0e0;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            text-align: center;
+        }
+
+        .media-label {
+            padding: 10px;
+            background: #1a1a1d;
+            border-top: 1px solid #333;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #ccc;
+            font-weight: 500;
+        }
+        .media-label.output { color: var(--theme-accent); font-weight: 700; background: rgba(106, 176, 149, 0.1); }
+
+        /* ================= GRID LAYOUTS ================= */
+        /* 3-Column: Video | Image/Ref | Output */
+        .grid-3-col {
+            display: grid;
+            grid-template-columns: 1fr 0.8fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px; /* Space between cases */
+        }
+        /* 2-Column: Input | Output */
+        .grid-2-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        /* 5-Column for Comparison */
+        .grid-5-col {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .case-title {
+            grid-column: 1 / -1;
+            font-size: 1rem;
+            color: #fff;
+            margin-bottom: 5px;
+            margin-top: 10px;
+            padding-left: 10px;
+            border-left: 3px solid var(--theme-accent);
+        }
+
+        /* ================= TABS ================= */
+        .tab-container {
+            display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;
+            margin-bottom: 40px;
+        }
+        .tab-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #888; padding: 10px 20px;
+            border-radius: 30px; cursor: pointer;
+            font-family: "Outfit", sans-serif; font-size: 0.95rem; font-weight: 600;
+            transition: all 0.3s;
+        }
+        .tab-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        .tab-btn.active {
+            background: var(--theme-accent); color: #000;
+            border-color: var(--theme-accent);
+            box-shadow: 0 0 15px rgba(106, 176, 149, 0.4);
+        }
+        .tab-content { display: none; animation: fadeIn 0.5s ease; }
+        .tab-content.active { display: block; }
+
+        .sub-tab-container { margin-top: 20px; margin-bottom: 30px; }
+        .sub-tab-btn { padding: 8px 16px; font-size: 0.9rem; border-radius: 8px; border: 1px solid #444; background: transparent; color: #888; cursor: pointer; margin: 0 5px; }
+        .sub-tab-btn.active { border-color: var(--theme-accent); color: var(--theme-accent); }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ================= ABSTRACT & HIGHLIGHTS ================= */
+        .abstract-box {
+            background: #202022; padding: 30px; border-radius: 16px; border: 1px solid #333;
+            max-width: 1000px; margin: 0 auto; text-align: justify;
+        }
+        .highlights-box {
+            background: rgba(106, 176, 149, 0.1);
+            border-left: 4px solid var(--theme-accent);
+            padding: 15px; margin-bottom: 25px; border-radius: 0 8px 8px 0;
+        }
+        .highlights-box ul { margin: 0; padding-left: 20px; }
+        .highlights-box li { margin-bottom: 5px; color: #ddd; }
+
+        @media (max-width: 768px) {
+            #intro h1 { font-size: 2.5rem; }
+            .grid-3-col, .grid-2-col { grid-template-columns: 1fr; }
+            section { padding: 40px 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HERO SECTION -->
+    <section id="intro">
+        <div class="background-video">
+            <!-- Used one of the ref videos as background -->
+            <video muted loop playsinline autoplay src="videos/0_refvideo.mp4"></video>
+        </div>
+        <div class="content">
+            <h1>FullDiT2</h1>
+            <div style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 30px; font-weight: 300;">
+                Efficient In-Context Conditioning for Video Diffusion Transformers
+            </div>
+            
+            <div class="authors-list">
+                <strong><a href="https://xuanhuahe.github.io/">Xuanhua He</a></strong><sup>1</sup>, 
+                <strong><a href="https://liuquande.github.io/">Quande Liu</a></strong><sup>2,†</sup>, 
+                <strong><a href="https://zixuan-ye.github.io/">Zixuan Ye</a></strong><sup>1</sup>, 
+                <strong><a href="https://ywcmaike.github.io/">Weicai Ye</a></strong><sup>2</sup>, 
+                <strong><a href="https://openreview.net/profile?id=~Qiulin_Wang1">Qiulin Wang</a></strong><sup>2</sup>, 
+                <br>
+                <strong><a href="https://xinntao.github.io/">Xintao Wang</a></strong><sup>2</sup>, 
+                <strong><a href="https://cqf.io/">Qifeng Chen</a></strong><sup>1</sup>, 
+                <strong><a href="https://scholar.google.com/citations?user=P6MraaYAAAAJ&hl=en">Pengfei Wan</a></strong><sup>2</sup>, 
+                <strong><a href="https://openreview.net/profile?id=~Di_ZHANG3">Di Zhang</a></strong><sup>2</sup>, 
+                <strong><a href="https://openreview.net/profile?id=~Kun_Gai1">Kun Gai</a></strong><sup>2</sup>
+            </div>
+            <div class="affiliation">
+                <sup>1</sup>The Hong Kong University of Science and Technology &nbsp;&nbsp;
+                <sup>2</sup>Kuaishou Technology
+                <sup>†</sup>Corresponding author
+            </div>
+
+            <div style="margin-top: 30px;">
+                <a href="#paper-link-placeholder" class="hero-btn"><i class="fas fa-file-pdf"></i> Paper (PDF)</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- ABSTRACT -->
+    <section id="abstract">
+        <h2>Abstract</h2>
+        <div class="abstract-box">
+            <p>Fine-grained and efficient controllability on video diffusion transformers has raised increasing desires for the applicability. Recently, In-context Conditioning emerged as a powerful paradigm for unified conditional video generation, which enables diverse controls by concatenating varying context conditioning signals with noisy video latents into a long unified token sequence and jointly processing them via full-attention, e.g., FullDiT. Despite their effectiveness, these methods face quadratic computation overhead as task complexity increases, hindering practical deployment. In this paper, we study the efficiency bottleneck neglected in original in-context conditioning video generation framework. We begin with systematic analysis to identify two key sources of the computation inefficiencies: the inherent redundancy within context condition tokens and the computational redundancy in context-latent interactions throughout the diffusion process. Based on these insights, we propose FullDiT2, an efficient in-context conditioning framework for general controllability in both video generation and editing tasks, which innovates from two key perspectives. Firstly, to address the token redundancy in context conditions, FullDiT2 leverages a dynamical token selection mechanism to adaptively identity important context tokens, reducing the sequence length for unified full-attention. Additionally, a selective context caching mechanism is devised to minimize redundant interactions between condition tokens and video latents throughout the diffusion process. Extensive experiments on six diverse conditional video editing and generation tasks demonstrate that FullDiT2 achieves significant computation reduction and 2-3 times speedup in averaged time cost per diffusion step, with minimal degradation or even higher performance in video generation quality.</p>
+
+        </div>
+    </section>
+
+    <!-- SHOWCASE SECTION -->
+    <section id="showcase" style="background: #1f1f23;">
+        <h2>Showcase: Diverse Capabilities</h2>
+        <p class="text-center" style="margin-bottom: 40px;">FullDiT2 maintains high fidelity across diverse generation tasks.</p>
+
+        <!-- Main Showcase Tabs -->
+        <div class="tab-container">
+            <button class="tab-btn active" onclick="openTab('showcase-id-insertion')">ID Insertion</button>
+            <button class="tab-btn" onclick="openTab('showcase-id-swap')">ID Swap</button>
+            <button class="tab-btn" onclick="openTab('showcase-id-deletion')">ID Deletion</button>
+            <button class="tab-btn" onclick="openTab('showcase-re-camera')">Video Re-Camera</button>
+            <button class="tab-btn" onclick="openTab('showcase-pose')">Pose-to-Video</button>
+            <button class="tab-btn" onclick="openTab('showcase-traj')">Trajectory-to-Video</button>
+        </div>
+
+        <!-- 1. ID INSERTION (6 Samples) -->
+        <div id="showcase-id-insertion" class="tab-content active container">
+            <div class="highlights-box">
+                <p><strong>Task:</strong> Insert a specific identity (image) into a reference video while preserving motion/style.</p>
+            </div>
+            
+            <!-- Sample 1 -->
+            <div class="case-title">Sample 1</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/0_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/hb.png"></div><div class="media-label">ID Ref</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/0_generated_1644.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <!-- Sample 2 -->
+            <div class="case-title">Sample 2</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/7_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/xx.png"></div><div class="media-label">ID Ref</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/7_generated_114514.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <!-- Sample 3 -->
+            <div class="case-title">Sample 3</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/12_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/cm.png"></div><div class="media-label">ID Ref</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/12_generated_1453.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <!-- Sample 4 -->
+            <div class="case-title">Sample 4</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/38_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/yj.jpeg"></div><div class="media-label">ID Ref</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/38_generated_114514.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <!-- Sample 5 -->
+            <div class="case-title">Sample 5</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/ours/20_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/ttq.png"></div><div class="media-label">ID Ref</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/ours/20_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+             <!-- Sample 6 -->
+             <div class="case-title">Sample 6</div>
+             <div class="grid-3-col">
+                 <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/44_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                 <div class="media-card"><div class="media-content"><img src="figs/hl.png"></div><div class="media-label">ID Ref</div></div>
+                 <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/44_generated_1644.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+             </div>
+        </div>
+
+        <!-- 2. ID SWAP (6 Samples) -->
+        <div id="showcase-id-swap" class="tab-content container">
+            <div class="highlights-box"><p><strong>Task:</strong> Swap the subject in the video with a target ID.</p></div>
+            
+            <div class="case-title">Sample 1</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/16_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/zbs.png"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/16_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 2</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/18_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/ljl.png"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/18_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 3</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/19_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/car.jpeg"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/19_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 4</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/0_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/bag.jpg"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/0_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 5</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/37_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/robot.png"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/37_generated_1234.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 6</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/39_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><img src="figs/suit.png"></div><div class="media-label">Target ID</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/swap/39_generated_1234.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+        </div>
+
+        <!-- 3. ID DELETION (6 Samples, 2-col) -->
+        <div id="showcase-id-deletion" class="tab-content container">
+            <div class="highlights-box"><p><strong>Task:</strong> Cleanly remove the main subject/object.</p></div>
+
+            <div class="case-title">Sample 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/0_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/0_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+            <div class="case-title">Sample 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/10_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/10_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+            <div class="case-title">Sample 3</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/1_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/1_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+            <div class="case-title">Sample 4</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/4_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/4_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+            <div class="case-title">Sample 5</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/7_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/7_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+            <div class="case-title">Sample 6</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/9_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/delete/9_generated.mp4"></video></div><div class="media-label output">Deletion Output</div></div>
+            </div>
+        </div>
+
+        <!-- 4. RE-CAMERA (6 Samples) -->
+        <div id="showcase-re-camera" class="tab-content container">
+            <div class="highlights-box"><p><strong>Task:</strong> Render new views based on a reference video and camera trajectory.</p></div>
+
+            <div class="case-title">Sample 1</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/5_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/5_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/5_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 2</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/15_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/15_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/15_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 3</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/24_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/24_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/24_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 4</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/36_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/36_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/36_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 5</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/49_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/49_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/49_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 6</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/51_refvideo.mp4"></video></div><div class="media-label">Ref Video</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/51_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/recamera/51_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+        </div>
+
+        <!-- 5. POSE (6 Samples, 2-col) -->
+        <div id="showcase-pose" class="tab-content container">
+            <div class="highlights-box"><p><strong>Task:</strong> Driven by pose sequences.</p></div>
+            
+            <div class="case-title">Sample 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/1_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/1_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+            <div class="case-title">Sample 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/3_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/3_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+            <div class="case-title">Sample 3</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/12_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/12_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+            <div class="case-title">Sample 4</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/27_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/27_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+            <div class="case-title">Sample 5</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/7_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/7_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+            <div class="case-title">Sample 6</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/13_refvideo.mp4"></video></div><div class="media-label">Pose Sequence</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/pose/13_generated_1234.mp4"></video></div><div class="media-label output">Generated Video</div></div>
+            </div>
+        </div>
+
+        <!-- 6. TRAJECTORY (6 Samples, Middle is Text) -->
+        <div id="showcase-traj" class="tab-content container">
+            <div class="highlights-box"><p><strong>Task:</strong> Camera Trajectory + Text Prompt -> Video.</p></div>
+
+            <div class="case-title">Sample 1</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/8_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">a fantastical treehouse city, rendered in a bright, expressive animated style.</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/17_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 2</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/16_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">A dramatic Chinese ink painting of a waterfall</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/37_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 3</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/20_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">A wonderful scene of Universe stars</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/48_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 4</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/23_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">A fantastical underwater city of Atlantis</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/47_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 5</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/24_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">A first-person perspective through a underwater enviroment.</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/24_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+            <div class="case-title">Sample 6</div>
+            <div class="grid-3-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/30_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+                <div class="media-card"><div class="text-prompt-box">A collection of festival decorations.</div><div class="media-label">Text</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camera/30_generated.mp4"></video></div><div class="media-label output">FullDiT2 Output</div></div>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- METHOD SECTION -->
+    <section id="method">
+        <div class="container">
+            <h2 class="text-center">Our Approach: FullDiT2</h2>
+            
+            <!-- Text Content -->
+            <div class="abstract-box" style="text-align: left; margin-bottom: 50px;">
+                <p>Traditional approaches to conditional video generation, such as adapter-based methods, often require introducing additional network structures for specific tasks, which can be less flexible. As shown in Figure 1, In-Context Conditioning (ICC) as exemplified by models like FullDiT offers a more unified solution by concatenating condition tokens with noisy latents and processing them jointly, achieving diverse control capabilities. However, this token concatenation strategy, while effective, introduces a significant computational burden due to the quadratic complexity of full attention on these extended sequences. To address this challenge, we propose FullDiT2, an efficient ICC framework. FullDiT2 inherits the versatile context conditioning mechanism but introduces two key innovations to mitigate the computational overhead: 1) Dynamic Token Selection to reduce sequence length for full-attention by identifying important context tokens, and 2) Selective Context Caching to minimize redundant computations by efficiently caching and skipping context tokens across diffusion steps and blocks. Our method thus realizes an efficient and effective ICC framework for controllable video generation and editing.</p>
+                
+                <h4 style="color: var(--theme-accent); margin-top: 25px; margin-bottom: 10px; font-size: 1.2rem;">1. Dynamic Token Selection</h4>
+                <p>To address token redundancy where many context tokens might be less informative, each Transformer block in FullDiT2 adaptively selects an informative subset of reference tokens (e.g., top 50% in our implementation) using a lightweight, learnable importance prediction network operating on reference Value vectors. This reduces the sequence length for attention involving reference tokens, lowering computational cost from $O((n_z+n_c)^2)$ towards $O((n_z+k)^2)$. Unselected reference tokens bypass the attention mechanism and are re-concatenated after the Feed-Forward Network to preserve their information for subsequent layers.</p>
+
+                <h4 style="color: var(--theme-accent); margin-top: 25px; margin-bottom: 10px; font-size: 1.2rem;">2. Selective Context Caching</h4>
+                <p>To tackle computation redundancy across timesteps and layers, FullDiT2 first identifies important layers for reference token processing using a Block Importance Index. Only these pre-selected important layers (e.g., 4 layers with highest BI plus the first layer for token projection in our model) process reference information; intermediate layers only process noisy tokens, with reference representations passed directly between important layers. For temporal efficiency, especially given that context tokens are relatively static across diffusion steps compared to noisy latents, we cache the Key (K) and Value (V) of selected top-k reference tokens from the first sampling step ($T_0$). These cached K/V values are then reused in subsequent steps for the non-skipped layers, avoiding redundant re-computation. Decoupled attention is employed to maintain training-inference consistency during this caching process, as naive caching can lead to misalignment.</p>
+            </div>
+
+            <!-- Figure 2 -->
+            <div style="margin-bottom: 50px; max-width: 1000px; margin-left: auto; margin-right: auto;">
+                <h3 class="text-center" style="color: #fff; font-size: 1.3rem; margin-bottom: 15px;">Comparison of our FullDiT2 with adapter-based methods and FullDiT.</h3>
+                <div class="media-card" style="border: 1px solid #444; background: #222; padding: 15px;">
+                    <img src="figs/first_fig.png" alt="Comparison" style="width: 100%; border-radius: 8px; display: block;">
+                </div>
+                <p style="text-align: center; color: #aaa; margin-top: 15px; font-size: 0.95rem;">Figure 2: Comparison of our FullDiT2 with adapter-based methods and FullDiT.</p>
+            </div>
+
+            <!-- Figure 3 -->
+            <div style="max-width: 1000px; margin-left: auto; margin-right: auto;">
+                <h3 class="text-center" style="color: #fff; font-size: 1.3rem; margin-bottom: 15px;">FullDiT2 Framework Overview</h3>
+                <div class="media-card" style="border: 1px solid #444; background: #222; padding: 15px;">
+                    <img src="figs/mainfig_0516_v2.png" alt="Framework Overview" style="width: 100%; border-radius: 8px; display: block;">
+                </div>
+                <p style="text-align: center; color: #aaa; margin-top: 15px; font-size: 0.95rem;">Figure 3: (Left) Dynamic Token Selection (DTS) module selects top-K reference tokens for attention. (Right) Selective Context Caching illustrates temporal-layer caching and skipping for efficiency.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- COMPARISON SECTION -->
+<!-- COMPARISON SECTION -->
+<section id="comparisons" style="background: #202022;">
+    <h2>Comparisons</h2>
+    <div class="tab-container">
+        <button class="tab-btn active" onclick="openTab('comp-baseline')">vs. Baseline (FullDiT)</button>
+        <button class="tab-btn" onclick="openTab('comp-general')">vs. General Models</button>
+    </div>
+
+    <!-- 1. VS BASELINE -->
+    <div id="comp-baseline" class="tab-content active container">
+        
+        <div class="sub-tab-container text-center">
+            <button class="sub-tab-btn active" onclick="openSubTab(event, 'sub-insert')">ID Insert</button>
+            <button class="sub-tab-btn" onclick="openSubTab(event, 'sub-swap')">ID Swap</button>
+            <button class="sub-tab-btn" onclick="openSubTab(event, 'sub-del')">Deletion</button>
+            <button class="sub-tab-btn" onclick="openSubTab(event, 'sub-recam')">Re-Camera</button>
+            <button class="sub-tab-btn" onclick="openSubTab(event, 'sub-pose')">Pose</button>
+            <button class="sub-tab-btn" onclick="openSubTab(event, 'sub-traj')">Trajectory</button>
+        </div>
+
+        <!-- SubTab: ID Insert -->
+        <div id="sub-insert" class="sub-content active">
+            <div class="highlights-box">
+                <p><strong>ID Insertion Highlights:</strong> FullDiT2 can even outperform the baseline in ID insertion tasks.</p>
+                <ul>
+                    <li><strong>Speedup (Ours):</strong> 2.287x</li>
+                    <li><strong>GFLOPS (Baseline vs Ours):</strong> 69.292 vs 33.141</li>
+                    <li><strong>CLIP-I (Baseline vs Ours):</strong> 0.568 vs 0.605 (Higher is better)</li>
+                    <li><strong>DINO-S (Baseline vs Ours):</strong> 0.254 vs 0.313 (Higher is better)</li>
+                </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/insert/baseline/26_generated_114514.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/insert/ours/26_generated_1644.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/insert/baseline/32_generated_211985.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/insert/ours/32_generated_211985.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+
+        <!-- SubTab: ID Swap -->
+        <div id="sub-swap" class="sub-content" style="display:none">
+            <div class="highlights-box">
+                <p><strong>ID Swap Highlights:</strong> Achieves comparable quality with significant speedup.</p>
+                <ul>
+                    <li><strong>Speedup (Ours):</strong> 2.287x</li>
+                    <li><strong>GFLOPS (Baseline vs Ours):</strong> 69.292 vs 33.141</li>
+                    <li><strong>CLIP-I (Baseline vs Ours):</strong> 0.619 vs 0.621</li>
+                </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/swap/baseline/21_generated_1453.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/swap/ours/21_generated_211985.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/swap/baseline/2_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/swap/ours/2_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+
+        <!-- SubTab: Deletion -->
+        <div id="sub-del" class="sub-content" style="display:none">
+            <div class="highlights-box">
+                <p><strong>ID Deletion Highlights:</strong> Efficiently removes objects while maintaining background consistency.</p>
+                 <ul>
+                     <li><strong>Speedup (Ours):</strong> 2.287x</li>
+                     <li><strong>GFLOPS (Baseline vs Ours):</strong> 69.292 vs 33.141</li>
+                 </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/delete/baseline/4_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/delete/ours/4_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/delete/baseline/6_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/delete/ours/6_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+
+        <!-- SubTab: ReCamera -->
+        <div id="sub-recam" class="sub-content" style="display:none">
+            <div class="highlights-box">
+                <p><strong>Video Re-Camera Highlights:</strong> Achieves the most significant speedup in complex tasks.</p>
+                <ul>
+                    <li><strong>Speedup (Ours):</strong> 3.433x</li>
+                    <li><strong>GFLOPS:</strong> Reduces cost to only ~32% of baseline (101.5 vs 33.4)</li>
+                    <li><strong>Error Metrics:</strong> Maintains comparable or better camera trajectory accuracy.</li>
+                </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/recamera/baseline/5_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/recamera/ours/5_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/recamera/baseline/15_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/recamera/ours/15_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+
+         <!-- SubTab: Pose -->
+         <div id="sub-pose" class="sub-content" style="display:none">
+            <div class="highlights-box">
+                <p><strong>Pose-to-Video Highlights:</strong> Maintains high pose control accuracy (PCK) with over 2x speedup.</p>
+                <ul>
+                   <li><strong>Speedup (Ours):</strong> 2.143x</li>
+                   <li><strong>GFLOPS (Baseline vs Ours):</strong> 64.457 vs 33.111 </li>
+                   <li><strong>PCK (Pose Control):</strong> Maintained (e.g. 72.4 vs 71.4)</li>
+               </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/pose/baseline/1_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/pose/ours/1_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/pose/baseline/10_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/pose/ours/10_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+
+        <!-- SubTab: Trajectory -->
+        <div id="sub-traj" class="sub-content" style="display:none">
+            <div class="highlights-box">
+                <p><strong>Trajectory-to-Video Highlights:</strong> Keeps high fidelity to camera trajectory while being much faster.</p>
+                <ul>
+                   <li><strong>Speedup (Ours):</strong> 2.143x</li>
+                   <li><strong>GFLOPS (Baseline vs Ours):</strong> 64.457 vs 33.111</li>
+                   <li><strong>Error Metrics:</strong> Maintained camera accuracy (e.g. TransErr 5.75 vs 5.71)</li>
+               </ul>
+            </div>
+            <div class="case-title">Case 1</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/camera/baseline/8_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/camera/ours/8_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+            <div class="case-title">Case 2</div>
+            <div class="grid-2-col">
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/camera/baseline/16_generated.mp4"></video></div><div class="media-label">Baseline</div></div>
+                <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/camp/camera/ours/16_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. VS GENERAL MODELS (This part remains the same) -->
+    <div id="comp-general" class="tab-content container">
+        
+        <div class="case-title">ID Insert</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/ours/20_refvideo.mp4"></video></div><div class="media-label">Input</div></div>
+            <div class="media-card"><div class="media-content"><img src="figs/ttq.png"></div><div class="media-label">ID Ref</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/dil/20_generated_1234.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/fora/20_generated_1234.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/insert/ours/20_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+
+        <div class="case-title">ID Swap</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/swap/ours/2_refvideo.mp4"></video></div><div class="media-label">Input</div></div>
+            <div class="media-card"><div class="media-content"><img src="figs/sofa.png"></div><div class="media-label">ID Ref</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/swap/dil/2_generated_1234.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/swap/fora/2_generated_1234.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/swap/ours/2_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+
+        <div class="case-title">ID Delete</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/delete/ours/4_refvideo.mp4"></video></div><div class="media-label">Input</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/delete/dil/4_generated_1234.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/delete/fora/4_generated_1234.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/delete/ours/4_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+
+        <div class="case-title">Re-Camera</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/recamera/ours/15_refvideo.mp4"></video></div><div class="media-label">Input</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/recamera/dil/15_generated.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/recamera/fora/15_generated.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/recamera/ours/15_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+
+        <div class="case-title">Trajectory</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/camera/ours/23_camera_video.mp4"></video></div><div class="media-label">Cam Traj.</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/camera/dil/23_generated.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/camera/fora/23_generated.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/camera/ours/23_generated.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+
+        <div class="case-title">Pose</div>
+        <div class="grid-5-col">
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/pose/ours/1_refvideo.mp4"></video></div><div class="media-label">Pose Seq.</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/pose/dil/1_generated_1234.mp4"></video></div><div class="media-label">Delta-DiT</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/pose/fora/1_generated_1234.mp4"></video></div><div class="media-label">FORA</div></div>
+            <div class="media-card"><div class="media-content"><video muted loop playsinline autoplay src="videos/general/pose/ours/1_generated_1234.mp4"></video></div><div class="media-label output">FullDiT2</div></div>
+        </div>
+    </div>
+</section>
+    <section id="results" class="container" style="padding: 40px 0;">
+        <h2>Summary</h2>
+        <div class="highlights-box" style="background: rgba(255,255,255,0.05); border-left: 4px solid var(--theme-accent);">
+            <ul>
+                <li><strong>Significant Speedup:</strong> Achieves 2-3 times speedup in averaged time cost per diffusion step compared to the baseline FullDiT. For instance, in ID-related video editing tasks, FullDiT2 achieves approximately 2.28x speedup.</li>
+                <li><strong>Reduced Computational Cost:</strong> Particularly pronounced in tasks with multiple conditions, such as Video Re-Camera, where FullDiT2 reduces computational cost to only 32% of baseline FLOPs and achieves a 3.43x speedup.</li>
+                <li><strong>Preserved/Improved Quality:</strong> Maintains high fidelity and accurately adheres to various conditioning inputs, achieving results comparable to or even outperforming the baseline. For example, FullDiT2 can outperform in ID insertion tasks.</li>
+        </ul>
+        </div>
+    </section>
+
+    <section id="footer" style="background: #000; text-align: center; padding: 40px;">
+        <p style="margin: 0; font-size: 14px; opacity: 0.6;">&copy; 2025 Anonymous Author(s). FullDiT2: Efficient In-Context Conditioning.</p>
+    </section>
+
+    <script>
+        // Tab Logic
+        function openTab(tabName) {
+            const contents = document.querySelectorAll('.tab-container ~ .tab-content'); // Main tabs
+            contents.forEach(c => c.classList.remove('active'));
+            
+            const buttons = document.querySelectorAll('.tab-container .tab-btn');
+            buttons.forEach(b => b.classList.remove('active'));
+            
+            document.getElementById(tabName).classList.add('active');
+            event.currentTarget.classList.add('active');
+            
+            // Auto-play videos in new tab
+            const newVideos = document.getElementById(tabName).querySelectorAll('video');
+            newVideos.forEach(v => { v.currentTime = 0; v.play(); });
+        }
+
+        // Sub-Tab Logic (for Baseline Comparison)
+        function openSubTab(evt, subName) {
+            const container = document.getElementById('comp-baseline');
+            const contents = container.querySelectorAll('.sub-content');
+            contents.forEach(c => c.style.display = 'none');
+            
+            const buttons = container.querySelectorAll('.sub-tab-btn');
+            buttons.forEach(b => b.classList.remove('active'));
+            
+            document.getElementById(subName).style.display = 'block';
+            evt.currentTarget.classList.add('active');
+            
+            const newVideos = document.getElementById(subName).querySelectorAll('video');
+            newVideos.forEach(v => { v.currentTime = 0; v.play(); });
+        }
+
+        // Lazy Load / Autoplay
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.play();
+                else entry.target.pause();
+            });
+        }, {rootMargin: '200px'});
+        
+        document.querySelectorAll("video").forEach(video => {
+            observer.observe(video);
+        });
+
+        // Parallax for Hero
+        document.addEventListener("scroll", () => {
+            const top = Math.max(Math.min(window.scrollY / 500, 1), 0);
+            const video = document.querySelector('#intro .background-video video');
+            if(video) video.style.transform = `scale(${1.05 + top * 0.1})`;
+        });
+    </script>
+</body>
+</html>
